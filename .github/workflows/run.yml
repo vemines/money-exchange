@@ -1,0 +1,37 @@
+name: Schedule Update
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.PAT }} # Use the PAT here
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Run the command
+        run: node index.js
+        env:
+          APIURL: ${{ secrets.APIURL }}
+
+      - name: Commit and push (if there are changes)
+        run: |
+          git config --global user.email "github-actions@github.com"
+          git config --global user.name "github-actions"
+          git stash
+          git pull --rebase
+          git stash pop
+          git add --sparse -A
+          git diff --staged --quiet || git commit -m "Update Currencies"
+          git push https://x-access-token:${{ secrets.PAT }}@github.com/vemines/money-exchange  # Use PAT for pushing
