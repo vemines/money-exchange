@@ -1,0 +1,114 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  scrollbar-width: thin;
+}
+
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu,
+    Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  background-color: #f4f4f4;
+}
+
+.container {
+  padding: 2rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 5px 5px rgba(0, 0, 0, 0.1);
+  width: 500px;
+  margin: 0 auto;
+  background-color: white;
+}
+
+h1 {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+/* Form */
+.exchange-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.input-group {
+  display: flex;
+  flex-direction: column;
+}
+label {
+  margin-bottom: 0.5rem;
+}
+
+input,
+.select-currency {
+  border: 2px solid #ccc;
+  border-radius: 5px;
+  font-size: 16px;
+  padding: 10px;
+}
+input:focus,
+.select-currency:focus {
+  border-color: #04aa6d;
+  outline: none;
+}
+.select-currency {
+  position: relative;
+  cursor: pointer;
+}
+
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+
+/* Dropdown Items Container */
+.select-items {
+  position: absolute;
+  top: 102%;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  border: 2px solid #ccc;
+  border-top: none;
+  background-color: white;
+  border-bottom-left-radius: 0.5rem;
+  border-bottom-right-radius: 0.5rem;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* Hide Dropdown by Default */
+.hide {
+  display: none;
+}
+
+/* Search Input in Dropdown */
+.select-items input {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid grey;
+}
+
+/* Individual Options */
+.select-items div {
+  padding: 8px;
+}
+
+.select-items div:hover {
+  background-color: #f0f0f0;
+}
+
+.dropdown.active + .select-items {
+  display: block;
+}
+
+.result {
+  margin-top: 20px;
+  text-align: center;
+  font-size: 20px;
+  font-weight: 500;
+  height: 35px;
+}

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Money Exchange</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="container">
+      <h1>Money Exchange</h1>
+      <div class="exchange-form">
+        <div class="input-group">
+          <label for="amount">Amount:</label>
+          <input type="number" id="amount" value="1" min="0" />
+        </div>
+
+        <div class="input-group">
+          <label>From:</label>
+          <div class="select-currency" id="from-currency">
+            <div class="dropdown">Select Currency</div>
+            <div class="select-items hide">
+              <input type="text" placeholder="Search..." />
+            </div>
+          </div>
+        </div>
+
+        <div class="input-group">
+          <label>To:</label>
+          <div class="select-currency" id="to-currency" name="to-currency">
+            <div class="dropdown">Select Currency</div>
+            <div class="select-items hide">
+              <input type="text" placeholder="Search..." />
+            </div>
+          </div>
+        </div>
+
+        <div class="result">
+          <p id="conversion-result"></p>
+        </div>
+      </div>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
