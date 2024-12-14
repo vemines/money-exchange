@@ -4,6 +4,8 @@ A simple web application for currency exchange that fetches exchange rates per h
 
 [Demo link here](https://vemines.github.io/money-exchange)
 
+[Latest Data](https://raw.githubusercontent.com/vemines/money-exchange/main/latest/data.json)
+
 ## Features
 
 - Fetches currency data from an external from [openexchangerates.org](openexchangerates.org)
