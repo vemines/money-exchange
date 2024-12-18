@@ -2,7 +2,7 @@
 
 A simple web application for currency exchange that fetches exchange rates per hours and allows users to convert between different currencies.
 
-[Demo link here](https://vemines.github.io/money-exchange)
+You can view a live demo of the project at: [Live demo](https://vemines.github.io/money-exchange)
 
 ## Features
 
