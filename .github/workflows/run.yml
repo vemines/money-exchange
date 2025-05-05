@@ -1,8 +1,10 @@
 name: Schedule Update
 
 on:
+  # Triggers the workflow every hour automatically
   schedule:
     - cron: '0 * * * *'
+  # Allows manual triggering from the GitHub Actions UI
   workflow_dispatch:
 
 jobs:
@@ -10,28 +12,65 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Get the repository code
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
-          token: ${{ secrets.PAT }} # Use the PAT here
+          # Provide PAT to allow the job to push changes back to the repo
+          token: ${{ secrets.PAT }}
 
+      # Set up the Node.js environment needed to run the scripts
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Run the command
+      # Run the script to fetch the latest currency rates
+      - name: Fetch Latest Currency Data
+        id: fetch_data
         run: node index.js
         env:
+          # Pass the API URL (including app_id) from GitHub Secrets
           APIURL: ${{ secrets.APIURL }}
+        # Fail the job if data fetching doesn't succeed
+        continue-on-error: false
 
-      - name: Commit and push (if there are changes)
+      # Remove daily data files older than 5 years to keep the repo size manageable
+      - name: Cleanup Old Data (> 5 years)
+        id: cleanup_data
+        # Only run if fetching data was successful
+        if: steps.fetch_data.outcome == 'success'
         run: |
-          git config --global user.email "github-actions@github.com"
-          git config --global user.name "github-actions"
-          git stash
-          git pull --rebase
-          git stash pop
-          git add --sparse -A
-          git diff --staged --quiet || git commit -m "Update Currencies"
-          git push https://x-access-token:${{ secrets.PAT }}@github.com/vemines/money-exchange  # Use PAT for pushing
+          echo "Searching for daily data files older than 5 years (1826 days)..."
+          # Find files in ./data modified more than 1825 days ago and delete them
+          find ./data/ -maxdepth 1 -type f -name '????-??-??.json' -mtime +1825 -print -delete || true
+          echo "Cleanup complete."
+
+      # Run the script to generate the historical summary files (week, month, etc.)
+      - name: Generate Historical Data
+        id: generate_history
+        # Only run if fetching and cleanup were successful
+        if: steps.fetch_data.outcome == 'success' && steps.cleanup_data.outcome == 'success'
+        run: node generate_history.js
+
+      # Commit the updated latest, daily, and historical files back to the repository
+      - name: Commit and push changes
+        # Only run if all previous data steps were successful
+        if: steps.fetch_data.outcome == 'success' && steps.cleanup_data.outcome == 'success' && steps.generate_history.outcome == 'success'
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          # Stage potential changes in all relevant directories
+          git add latest/ data/ history/
+          # Only commit and push if changes were actually staged
+          if ! git diff --staged --quiet; then
+            COMMIT_TIMESTAMP=$(date -u +'%Y-%m-%d T %H-%M-%S UTC')
+            COMMIT_MSG="Update Currencies ${COMMIT_TIMESTAMP}"
+            echo "Committing changes: $COMMIT_MSG"
+            git commit -m "$COMMIT_MSG"
+            echo "Pushing changes..."
+            # Use the PAT for authentication when pushing
+            git push https://x-access-token:${{ secrets.PAT }}@github.com/${{ github.repository }}
+          else
+            echo "No changes detected in currency data."
+          fi
