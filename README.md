@@ -4,14 +4,16 @@ A simple web application for currency exchange that fetches exchange rates per h
 
 You can view a live demo of the project at: [Live demo](https://vemines.github.io/money-exchange)
 
-[Latest Data](https://raw.githubusercontent.com/vemines/money-exchange/main/latest/data.json)
-[Custom Day (5 years from now)](https://raw.githubusercontent.com/vemines/money-exchange/main/data/2025-04-30.json)
-[Week History](https://raw.githubusercontent.com/vemines/money-exchange/main/history/week.json)
-[Month History](https://raw.githubusercontent.com/vemines/money-exchange/main/history/month.json)
-[6 Months History](https://raw.githubusercontent.com/vemines/money-exchange/main/history/6m.json)
-[Year History](https://raw.githubusercontent.com/vemines/money-exchange/main/history/year.json)
-[2 Years History](https://raw.githubusercontent.com/vemines/money-exchange/main/history/2y.json)
-[5 Years History](https://raw.githubusercontent.com/vemines/money-exchange/main/history/5y.json)
+[Latest Data](https://raw.githubusercontent.com/vemines/money-exchange/main/latest/data.json) <br> <br>
+[Custom Day 2025-04-30](https://raw.githubusercontent.com/vemines/money-exchange/main/data/2025-04-30.json)<br>
+[Week History](https://raw.githubusercontent.com/vemines/money-exchange/main/history/week.json)<br>
+[Month History](https://raw.githubusercontent.com/vemines/money-exchange/main/history/month.json)<br>
+[6 Months History](https://raw.githubusercontent.com/vemines/money-exchange/main/history/6m.json)<br>
+[Year History](https://raw.githubusercontent.com/vemines/money-exchange/main/history/year.json)<br>
+[2 Years History](https://raw.githubusercontent.com/vemines/money-exchange/main/history/2y.json)<br>
+[5 Years History](https://raw.githubusercontent.com/vemines/money-exchange/main/history/5y.json)<br>
+
+_Note: Be aware that some recently added currencies from openexchangerates.org might not have complete historical data available. Please verify carefully before use._
 
 ## Features
 
