@@ -8,10 +8,10 @@ const HISTORY_DIR = './history';
 const HISTORY_PERIODS = {
   week: { days: 7, sampleRule: { type: 'gap', value: 1 } }, // Every day file found
   month: { days: 31, sampleRule: { type: 'gap', value: 2 } }, // Every 2nd day file found
-  '6month': { days: 183, sampleRule: { type: 'daysOfMonth', values: [1, 11, 21] } }, // Target days 1, 11, 21
+  '6m': { days: 183, sampleRule: { type: 'daysOfMonth', values: [1, 11, 21] } }, // Target days 1, 11, 21
   year: { days: 366, sampleRule: { type: 'daysOfMonth', values: [1, 15] } }, // Target days 1, 15
-  '2year': { days: 731, sampleRule: { type: 'dayOfMonth', value: 1 } }, // Target day 1 of each month
-  '5year': { days: 1826, sampleRule: { type: 'firstDayOfNthMonth', value: 3 } }, // Target 1st of every 3rd month (Jan, Apr, Jul, Oct)
+  '2y': { days: 731, sampleRule: { type: 'dayOfMonth', value: 1 } }, // Target day 1 of each month
+  '5y': { days: 1826, sampleRule: { type: 'firstDayOfNthMonth', value: 3 } }, // Target 1st of every 3rd month (Jan, Apr, Jul, Oct)
 };
 
 // --- Helper Functions ---
