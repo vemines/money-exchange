@@ -21,14 +21,11 @@ jobs:
           echo "Attempting to restore original Git modification times..."
           git ls-files -z | while IFS= read -r -d $'\0' file; do
             if [ -f "$file" ]; then # Ensure file actually exists on disk
-              # Get commit timestamp as Unix epoch seconds, suppress git log errors
               commit_unix_time=$(git log -1 --format=%ct -- "$file" 2>/dev/null)
               if [ -n "$commit_unix_time" ]; then
-                # Format for `touch -t [[CC]YY]MMDDhhmm[.ss]`, suppress date errors
                 formatted_touch_time=$(date -u -d "@$commit_unix_time" +'%Y%m%d%H%M.%S' 2>/dev/null)
                 if [ -n "$formatted_touch_time" ]; then
-                  # Attempt to touch the file, ignore errors (best effort)
-                  touch -m -t "$formatted_touch_time" "$file" 2>/dev/null 
+                  touch -m -t "$formatted_touch_time" "$file" 2>/dev/null
                 fi
               fi
             fi
@@ -40,9 +37,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20' # Or your preferred Node.js version
-          cache: 'npm' # Optional: cache npm dependencies if you have a package-lock.json
+          # cache: 'npm' # REMOVED: Not needed if no package-lock.json or external npm dependencies
 
-      # If you have npm dependencies, uncomment and use:
+      # If you were to add npm dependencies in the future, you would:
+      # 1. Add 'cache: 'npm'' back to the setup-node step above.
+      # 2. Commit your package.json and package-lock.json.
+      # 3. Uncomment the following step:
       # - name: Install dependencies
       #   run: npm ci
 
@@ -60,10 +60,7 @@ jobs:
           TARGET_DIR="./data"
           DAYS_OLD=1825 # Approximately 5 years
           echo "Cleaning up files older than $DAYS_OLD days in $TARGET_DIR..."
-          # Find and delete old daily files, be less verbose on individual deletions
           find "$TARGET_DIR" -maxdepth 1 -type f -name '????-??-??.json' -mtime +$DAYS_OLD -print -delete || echo "Warning: find/delete command for cleanup encountered an issue but was allowed to continue."
-          # Optional: Log remaining count if needed for debugging, otherwise keep it quiet
-          # echo "Remaining JSON files in $TARGET_DIR after cleanup: $(find "$TARGET_DIR" -maxdepth 1 -type f -name '????-??-??.json' | wc -l)"
           echo "Cleanup of old data in ./data complete."
 
       - name: Generate Historical Data (generate_history.js)
@@ -77,9 +74,7 @@ jobs:
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          # Add all potentially changed directories
           git add latest/ data/ history/
-          # Check if there are any staged changes before attempting to commit
           if ! git diff --staged --quiet; then
             COMMIT_MSG="Update Currencies $(date -u +'%Y-%m-%d T %H-%M-%S UTC')"
             echo "Committing changes: $COMMIT_MSG"
@@ -91,7 +86,6 @@ jobs:
           fi
 
       - name: Sync changed files to Cloudflare R2
-        # Run if the main data generation steps were successful
         if: steps.fetch_data.outcome == 'success' && steps.cleanup_data.outcome == 'success' && steps.generate_history.outcome == 'success'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -100,14 +94,12 @@ jobs:
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
         run: |
           echo "Verifying AWS CLI availability..."
-          aws --version # Quick check that CLI is present
+          aws --version
 
           DIRECTORIES_TO_SYNC="latest history data"
           for DIR_NAME in $DIRECTORIES_TO_SYNC; do
             if [ -d "./$DIR_NAME" ]; then
               echo "Syncing changed files from './$DIR_NAME/' to R2 bucket '$R2_BUCKET_NAME' under '$DIR_NAME/'..."
-              # --no-progress reduces log verbosity by hiding per-file transfer status
-              # --delete ensures files removed locally are also removed from R2
               aws s3 sync "./$DIR_NAME/" "s3://${R2_BUCKET_NAME}/${DIR_NAME}/" \
                 --endpoint-url "${R2_ENDPOINT_URL}" \
                 --acl public-read \
