@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout code (with PAT so we can push back later)
+      # 1. Checkout code
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -21,13 +21,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          # cache: 'npm' # Add this back if you add package.json & package-lock.json
 
-      # 3. (Optional) Install npm deps - This step is only needed if you have package.json
-      #    If you add dependencies:
-      #    1. Ensure package.json and package-lock.json are committed.
-      #    2. Add 'cache: 'npm'' to the setup-node step above.
-      #    3. Uncomment this step:
+      # 3. (Optional) Install npm deps
       # - name: Install dependencies
       #   run: npm ci
 
@@ -40,8 +35,7 @@ jobs:
             while IFS= read -r -d $'\0' file; do
               if [ -f "$file" ]; then
                 ts=$(git log -1 --format=%ct -- "$file" 2>/dev/null)
-                if [ -n "$ts" ]; then # Check if timestamp is not empty
-                  # Ensure date command also handles potential errors gracefully
+                if [ -n "$ts" ]; then
                   formatted_time=$(date -u -d "@$ts" +'%Y%m%d%H%M.%S' 2>/dev/null)
                   if [ -n "$formatted_time" ]; then
                      touch -m -t "$formatted_time" "$file" 2>/dev/null
@@ -58,15 +52,15 @@ jobs:
         env:
           APIURL: ${{ secrets.APIURL }}
 
-      # 6. Cleanup old data (>5 years) from ./data
-      - name: Cleanup Old Data (> 5 years)
+      # 6. Cleanup old data (>5 years) from local ./data
+      - name: Cleanup Old Data (> 5 years) from local ./data
         id: cleanup_data
         if: steps.fetch_data.outcome == 'success'
         run: |
-          echo "Cleaning up data older than 5 years..."
+          echo "Cleaning up data older than 5 years from local ./data directory..."
           find "./data" -maxdepth 1 -type f -name '????-??-??.json' \
-            -mtime +1825 -print -delete || echo "Cleanup step had warnings but continued."
-          echo "Cleanup complete."
+            -mtime +1825 -print -delete || echo "Local cleanup step had warnings but continued."
+          echo "Local cleanup complete."
 
       # 7. Generate history JSON files
       - name: Generate Historical Data
@@ -77,11 +71,11 @@ jobs:
       # 8. Commit & push any changes back to the repo
       - name: Commit & Push Changes
         id: commit_changes
-        if: steps.fetch_data.outcome == 'success' && steps.cleanup_data.outcome == 'success' && steps.generate_history.outcome == 'success'
+        if: steps.generate_history.outcome == 'success'
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git add latest/ data/ history/
+          git add latest/ data/ history/ # Still add local data/ to git if it's part of your repo history
           if ! git diff --staged --quiet; then
             git commit -m "Update Currencies $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
             git push https://x-access-token:${{ secrets.PAT }}@github.com/${{ github.repository }}
@@ -89,16 +83,17 @@ jobs:
             echo "No changes to commit."
           fi
 
-      # 9. Sync files to Cloudflare R2 (S3-compatible) only if data gen succeeded
-      - name: Sync to Cloudflare R2
-        if: steps.generate_history.outcome == 'success' # Or a more comprehensive condition if needed
+      # 9. Sync 'latest' and 'history' folders to Cloudflare R2
+      - name: Sync 'latest' and 'history' to R2
+        id: sync_latest_history_to_r2
+        if: steps.generate_history.outcome == 'success'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_ENDPOINT_URL: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
         run: |
-          echo "Starting sync to R2..."
+          echo "Starting sync of 'latest' and 'history' to R2..."
           for DIR in latest history; do
             if [ -d "$DIR" ]; then
               echo " → Syncing $DIR/"
@@ -111,27 +106,33 @@ jobs:
               echo " → Directory $DIR/ not found; skipping."
             fi
           done
-          echo "Cloudflare R2 sync complete."
+          echo "'latest' and 'history' R2 sync complete."
 
-      - name: Sync to Cloudflare R2
-        if: steps.generate_history.outcome == 'success'
+      # 10. Delete 'data/' folder FROM Cloudflare R2 (no sync of local ./data to R2 beforehand)
+      - name: Delete 'data/' folder from R2
+        # Run if the 'latest' and 'history' sync was successful.
+        # This ensures the primary content is updated before attempting cleanup.
+        if: steps.sync_latest_history_to_r2.outcome == 'success'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_ENDPOINT_URL: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
         run: |
-          echo "Starting sync to R2..."
-          for DIR in data; do
-            if [ -d "$DIR" ]; then
-              echo " → Syncing $DIR/"
-              aws s3 sync "./$DIR/" "s3://${R2_BUCKET_NAME}/${DIR}/" \
-                --endpoint-url "${R2_ENDPOINT_URL}" \
-                --acl public-read \
-                --delete \
-                --no-progress
-            else
-              echo " → Directory $DIR/ not found; skipping."
-            fi
-          done
-          echo "Cloudflare R2 sync complete."
+          echo "Deleting 'data/' folder (prefix) from R2 bucket: ${R2_BUCKET_NAME}..."
+          # The `aws s3api list-objects-v2` and `aws s3api delete-objects` approach is more robust
+          # for deleting non-empty prefixes if `aws s3 rm --recursive` has issues or if you want more control.
+          # However, `aws s3 rm --recursive` is generally simpler and sufficient.
+
+          # Check if the prefix exists to avoid errors if it's already gone
+          # LIST_OUTPUT=$(aws s3api list-objects-v2 --bucket "${R2_BUCKET_NAME}" --prefix "data/" --max-keys 1 --endpoint-url "${R2_ENDPOINT_URL}" --query "Contents[].Key" --output text)
+          # if [ -n "$LIST_OUTPUT" ]; then
+          #   echo "  'data/' prefix found. Proceeding with deletion."
+          aws s3 rm "s3://${R2_BUCKET_NAME}/data/" \
+            --recursive \
+            --endpoint-url "${R2_ENDPOINT_URL}" \
+            --no-progress
+          # else
+          #   echo "  'data/' prefix not found in R2. Nothing to delete."
+          # fi
+          echo "'data/' folder deletion attempt from R2 complete."
