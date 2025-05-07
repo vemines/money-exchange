@@ -21,11 +21,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          # cache: 'npm' # Add this back if you add package.json & package-lock.json
 
-      # 3. (Optional) Install npm deps if you have package.json
-      - name: Install dependencies
-        if: ${{ exists('package.json') }}
-        run: npm ci
+      # 3. (Optional) Install npm deps - This step is only needed if you have package.json
+      #    If you add dependencies:
+      #    1. Ensure package.json and package-lock.json are committed.
+      #    2. Add 'cache: 'npm'' to the setup-node step above.
+      #    3. Uncomment this step:
+      # - name: Install dependencies
+      #   run: npm ci
 
       # 4. Restore Git mtimes BEFORE running scripts
       - name: Restore Git modification times (pre-script)
@@ -36,8 +40,12 @@ jobs:
             while IFS= read -r -d $'\0' file; do
               if [ -f "$file" ]; then
                 ts=$(git log -1 --format=%ct -- "$file" 2>/dev/null)
-                if [ -n "$ts" ]; then
-                  touch -m -t "$(date -u -d "@$ts" +'%Y%m%d%H%M.%S')" "$file"
+                if [ -n "$ts" ]; then # Check if timestamp is not empty
+                  # Ensure date command also handles potential errors gracefully
+                  formatted_time=$(date -u -d "@$ts" +'%Y%m%d%H%M.%S' 2>/dev/null)
+                  if [ -n "$formatted_time" ]; then
+                     touch -m -t "$formatted_time" "$file" 2>/dev/null
+                  fi
                 fi
               fi
             done
@@ -57,7 +65,7 @@ jobs:
         run: |
           echo "Cleaning up data older than 5 years..."
           find "./data" -maxdepth 1 -type f -name '????-??-??.json' \
-            -mtime +1825 -print -delete || echo "Cleanup step had warnings."
+            -mtime +1825 -print -delete || echo "Cleanup step had warnings but continued."
           echo "Cleanup complete."
 
       # 7. Generate history JSON files
@@ -83,6 +91,29 @@ jobs:
 
       # 9. Sync files to Cloudflare R2 (S3-compatible) only if data gen succeeded
       - name: Sync to Cloudflare R2
+        if: steps.generate_history.outcome == 'success' # Or a more comprehensive condition if needed
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT_URL: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          echo "Starting sync to R2..."
+          for DIR in latest history; do
+            if [ -d "$DIR" ]; then
+              echo " → Syncing $DIR/"
+              aws s3 sync "./$DIR/" "s3://${R2_BUCKET_NAME}/${DIR}/" \
+                --endpoint-url "${R2_ENDPOINT_URL}" \
+                --acl public-read \
+                --delete \
+                --no-progress
+            else
+              echo " → Directory $DIR/ not found; skipping."
+            fi
+          done
+          echo "Cloudflare R2 sync complete."
+
+      - name: Sync to Cloudflare R2
         if: steps.generate_history.outcome == 'success'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -91,7 +122,7 @@ jobs:
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
         run: |
           echo "Starting sync to R2..."
-          for DIR in latest data history; do
+          for DIR in data; do
             if [ -d "$DIR" ]; then
               echo " → Syncing $DIR/"
               aws s3 sync "./$DIR/" "s3://${R2_BUCKET_NAME}/${DIR}/" \
