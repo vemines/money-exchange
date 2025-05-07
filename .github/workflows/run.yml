@@ -2,111 +2,105 @@ name: Schedule Update
 
 on:
   schedule:
-    - cron: '0 * * * *' # Runs at the start of every hour
-  workflow_dispatch: # Allows manual triggering
+    - cron: '0 * * * *' # Runs at the top of every hour
+  workflow_dispatch: # Manual trigger supported
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout code
+      # 1. Checkout code (with PAT so we can push back later)
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.PAT }} # PAT for committing and pushing changes back to the repo
+          token: ${{ secrets.PAT }}
 
-      # Attempt to restore original Git modification times.
-      # This helps aws s3 sync correctly identify unchanged files if checkout updates their mtime.
-      - name: Restore Git modification times
-        run: |
-          echo "Attempting to restore original Git modification times..."
-          git ls-files -z | while IFS= read -r -d $'\0' file; do
-            if [ -f "$file" ]; then # Ensure file actually exists on disk
-              commit_unix_time=$(git log -1 --format=%ct -- "$file" 2>/dev/null)
-              if [ -n "$commit_unix_time" ]; then
-                formatted_touch_time=$(date -u -d "@$commit_unix_time" +'%Y%m%d%H%M.%S' 2>/dev/null)
-                if [ -n "$formatted_touch_time" ]; then
-                  touch -m -t "$formatted_touch_time" "$file" 2>/dev/null
-                fi
-              fi
-            fi
-          done
-          echo "Git modification times restoration attempt complete."
-        continue-on-error: true # Don't fail job if this experimental step has minor issues
-
+      # 2. Set up Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20' # Or your preferred Node.js version
-          # cache: 'npm' # REMOVED: Not needed if no package-lock.json or external npm dependencies
+          node-version: '20'
 
-      # If you were to add npm dependencies in the future, you would:
-      # 1. Add 'cache: 'npm'' back to the setup-node step above.
-      # 2. Commit your package.json and package-lock.json.
-      # 3. Uncomment the following step:
-      # - name: Install dependencies
-      #   run: npm ci
+      # 3. (Optional) Install npm deps if you have package.json
+      - name: Install dependencies
+        if: ${{ exists('package.json') }}
+        run: npm ci
 
-      - name: Fetch Latest Currency Data (index.js)
+      # 4. Restore Git mtimes BEFORE running scripts
+      - name: Restore Git modification times (pre-script)
+        continue-on-error: true
+        run: |
+          echo "Restoring git mtimes..."
+          git ls-files -z | \
+            while IFS= read -r -d $'\0' file; do
+              if [ -f "$file" ]; then
+                ts=$(git log -1 --format=%ct -- "$file" 2>/dev/null)
+                if [ -n "$ts" ]; then
+                  touch -m -t "$(date -u -d "@$ts" +'%Y%m%d%H%M.%S')" "$file"
+                fi
+              fi
+            done
+          echo "Pre-script mtime restoration complete."
+
+      # 5. Fetch latest currency data
+      - name: Fetch Latest Currency Data
         id: fetch_data
         run: node index.js
         env:
           APIURL: ${{ secrets.APIURL }}
-        continue-on-error: false # Fail job if API fetch or initial save fails
 
-      - name: Cleanup Old Data in ./data (> 5 years)
+      # 6. Cleanup old data (>5 years) from ./data
+      - name: Cleanup Old Data (> 5 years)
         id: cleanup_data
         if: steps.fetch_data.outcome == 'success'
         run: |
-          TARGET_DIR="./data"
-          DAYS_OLD=1825 # Approximately 5 years
-          echo "Cleaning up files older than $DAYS_OLD days in $TARGET_DIR..."
-          find "$TARGET_DIR" -maxdepth 1 -type f -name '????-??-??.json' -mtime +$DAYS_OLD -print -delete || echo "Warning: find/delete command for cleanup encountered an issue but was allowed to continue."
-          echo "Cleanup of old data in ./data complete."
+          echo "Cleaning up data older than 5 years..."
+          find "./data" -maxdepth 1 -type f -name '????-??-??.json' \
+            -mtime +1825 -print -delete || echo "Cleanup step had warnings."
+          echo "Cleanup complete."
 
-      - name: Generate Historical Data (generate_history.js)
+      # 7. Generate history JSON files
+      - name: Generate Historical Data
         id: generate_history
         if: steps.fetch_data.outcome == 'success' && steps.cleanup_data.outcome == 'success'
         run: node generate_history.js
 
-      - name: Commit and push changes to repository
+      # 8. Commit & push any changes back to the repo
+      - name: Commit & Push Changes
         id: commit_changes
         if: steps.fetch_data.outcome == 'success' && steps.cleanup_data.outcome == 'success' && steps.generate_history.outcome == 'success'
         run: |
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
           git add latest/ data/ history/
           if ! git diff --staged --quiet; then
-            COMMIT_MSG="Update Currencies $(date -u +'%Y-%m-%d T %H-%M-%S UTC')"
-            echo "Committing changes: $COMMIT_MSG"
-            git commit -m "$COMMIT_MSG"
-            echo "Pushing changes to repository..."
+            git commit -m "Update Currencies $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
             git push https://x-access-token:${{ secrets.PAT }}@github.com/${{ github.repository }}
           else
-            echo "No content changes detected in currency data to commit to repository."
+            echo "No changes to commit."
           fi
 
-      - name: Sync changed files to Cloudflare R2
-        if: steps.fetch_data.outcome == 'success' && steps.cleanup_data.outcome == 'success' && steps.generate_history.outcome == 'success'
+      # 9. Sync files to Cloudflare R2 (S3-compatible) only if data gen succeeded
+      - name: Sync to Cloudflare R2
+        if: steps.generate_history.outcome == 'success'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_ENDPOINT_URL: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
         run: |
-          echo "Verifying AWS CLI availability..."
-          aws --version
-
-          DIRECTORIES_TO_SYNC="latest history data"
-          for DIR_NAME in $DIRECTORIES_TO_SYNC; do
-            if [ -d "./$DIR_NAME" ]; then
-              echo "Syncing changed files from './$DIR_NAME/' to R2 bucket '$R2_BUCKET_NAME' under '$DIR_NAME/'..."
-              aws s3 sync "./$DIR_NAME/" "s3://${R2_BUCKET_NAME}/${DIR_NAME}/" \
+          echo "Starting sync to R2..."
+          for DIR in latest data history; do
+            if [ -d "$DIR" ]; then
+              echo " → Syncing $DIR/"
+              aws s3 sync "./$DIR/" "s3://${R2_BUCKET_NAME}/${DIR}/" \
                 --endpoint-url "${R2_ENDPOINT_URL}" \
                 --acl public-read \
                 --delete \
                 --no-progress
             else
-              echo "Directory './$DIR_NAME' not found locally. Skipping sync for this directory."
+              echo " → Directory $DIR/ not found; skipping."
             fi
           done
-          echo "Cloudflare R2 sync process complete."
+          echo "Cloudflare R2 sync complete."
