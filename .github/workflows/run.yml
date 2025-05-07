@@ -59,28 +59,23 @@ jobs:
             echo "No changes detected in currency data to commit."
           fi
 
-      - name: Install AWS CLI v2
-        if: steps.fetch_data.outcome == 'success' && steps.cleanup_data.outcome == 'success' && steps.generate_history.outcome == 'success'
-        run: |
-          echo "Installing AWS CLI v2..."
-          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" -fsSL # Added -fsSL for better curl output
-          unzip -q awscliv2.zip
-          sudo ./aws/install
-          rm -rf awscliv2.zip aws
-          echo "AWS CLI v2 installed successfully."
-          aws --version # Verify installation
+      # AWS CLI v2 is pre-installed on ubuntu-latest, so no installation step needed.
+      # You can verify its presence if you want:
+      # - name: Verify AWS CLI Version (Optional)
+      #   if: steps.fetch_data.outcome == 'success' && steps.cleanup_data.outcome == 'success' && steps.generate_history.outcome == 'success'
+      #   run: aws --version
 
       - name: Upload data to Cloudflare R2
         if: steps.fetch_data.outcome == 'success' && steps.cleanup_data.outcome == 'success' && steps.generate_history.outcome == 'success'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          # Note: AWS_DEFAULT_REGION is not strictly needed for R2 with endpoint, but good practice
-          # AWS_DEFAULT_REGION: us-east-1 # Or your preferred placeholder
           R2_ENDPOINT_URL: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
         run: |
           DIRECTORIES_TO_SYNC="latest data history"
+          echo "Verifying AWS CLI availability..."
+          aws --version # Confirm aws cli is available
           for DIR_NAME in $DIRECTORIES_TO_SYNC; do
             if [ -d "./$DIR_NAME" ]; then
               echo "Syncing './$DIR_NAME/' to R2 bucket '$R2_BUCKET_NAME' under '$DIR_NAME/'..."
