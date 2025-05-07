@@ -107,31 +107,3 @@ jobs:
             fi
           done
           echo "'latest' and 'history' R2 sync complete."
-
-      # 10. Delete 'data/' folder FROM Cloudflare R2 (no sync of local ./data to R2 beforehand)
-      - name: Delete 'data/' folder from R2
-        # Run if the 'latest' and 'history' sync was successful.
-        # This ensures the primary content is updated before attempting cleanup.
-        if: steps.sync_latest_history_to_r2.outcome == 'success'
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_ENDPOINT_URL: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
-          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
-        run: |
-          echo "Deleting 'data/' folder (prefix) from R2 bucket: ${R2_BUCKET_NAME}..."
-          # The `aws s3api list-objects-v2` and `aws s3api delete-objects` approach is more robust
-          # for deleting non-empty prefixes if `aws s3 rm --recursive` has issues or if you want more control.
-          # However, `aws s3 rm --recursive` is generally simpler and sufficient.
-
-          # Check if the prefix exists to avoid errors if it's already gone
-          # LIST_OUTPUT=$(aws s3api list-objects-v2 --bucket "${R2_BUCKET_NAME}" --prefix "data/" --max-keys 1 --endpoint-url "${R2_ENDPOINT_URL}" --query "Contents[].Key" --output text)
-          # if [ -n "$LIST_OUTPUT" ]; then
-          #   echo "  'data/' prefix found. Proceeding with deletion."
-          aws s3 rm "s3://${R2_BUCKET_NAME}/data/" \
-            --recursive \
-            --endpoint-url "${R2_ENDPOINT_URL}"
-          # else
-          #   echo "  'data/' prefix not found in R2. Nothing to delete."
-          # fi
-          echo "'data/' folder deletion attempt from R2 complete."
