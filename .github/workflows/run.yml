@@ -33,7 +33,6 @@ jobs:
           TARGET_DIR="./data"
           DAYS_OLD=1825 # Files older than approx 5 years
           echo "Cleaning up files older than $DAYS_OLD days in $TARGET_DIR..."
-          # Find and delete files matching pattern and age, logging each deletion
           find "$TARGET_DIR" -maxdepth 1 -type f -name '????-??-??.json' -mtime +$DAYS_OLD -print0 | while IFS= read -r -d $'\0' file; do
             echo "Deleting old file: $file (Last modified: $(stat -c %y "$file"))"
             rm -f "$file" || echo "Warning: Failed to delete $file"
@@ -60,17 +59,24 @@ jobs:
             echo "No changes detected in currency data to commit."
           fi
 
-      - name: Install AWS CLI
+      - name: Install AWS CLI v2
         if: steps.fetch_data.outcome == 'success' && steps.cleanup_data.outcome == 'success' && steps.generate_history.outcome == 'success'
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq awscli
+          echo "Installing AWS CLI v2..."
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" -fsSL # Added -fsSL for better curl output
+          unzip -q awscliv2.zip
+          sudo ./aws/install
+          rm -rf awscliv2.zip aws
+          echo "AWS CLI v2 installed successfully."
+          aws --version # Verify installation
 
       - name: Upload data to Cloudflare R2
         if: steps.fetch_data.outcome == 'success' && steps.cleanup_data.outcome == 'success' && steps.generate_history.outcome == 'success'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          # Note: AWS_DEFAULT_REGION is not strictly needed for R2 with endpoint, but good practice
+          # AWS_DEFAULT_REGION: us-east-1 # Or your preferred placeholder
           R2_ENDPOINT_URL: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
         run: |
