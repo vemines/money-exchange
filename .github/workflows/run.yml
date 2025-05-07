@@ -2,8 +2,8 @@ name: Schedule Update
 
 on:
   schedule:
-    - cron: '0 * * * *' # Runs at the top of every hour
-  workflow_dispatch: # Manual trigger supported
+    - cron: '0 * * * *'      # Runs at the top of every hour
+  workflow_dispatch:        # Manual trigger supported
 
 jobs:
   build-and-deploy:
