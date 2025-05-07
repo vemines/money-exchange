@@ -9,9 +9,10 @@ const DAILY_DATA_DIR = './data';
 
 function getCurrentDateString() {
   const now = new Date();
-  const day = String(now.getDate()).padStart(2, '0');
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const year = now.getFullYear();
+  // Get UTC date parts to ensure consistency regardless of server timezone
+  const day = String(now.getUTCDate()).padStart(2, '0');
+  const month = String(now.getUTCMonth() + 1).padStart(2, '0'); // Month is 0-indexed
+  const year = now.getUTCFullYear();
   return `${year}-${month}-${day}`;
 }
 
@@ -22,17 +23,46 @@ function ensureDirectoryExists(dirPath) {
       console.log(`Created directory: ${dirPath}`);
     } catch (error) {
       console.error(`Error creating directory ${dirPath}:`, error);
-      process.exit(1); // Exit if we can't create necessary directories
+      process.exit(1);
     }
+  }
+}
+
+// Function to write file only if content has changed
+function writeDataIfChanged(filePath, newDataString, logPrefix = '') {
+  try {
+    if (fs.existsSync(filePath)) {
+      const existingDataString = fs.readFileSync(filePath, 'utf8');
+      if (existingDataString === newDataString) {
+        console.log(
+          `${logPrefix}Content for ${path.basename(filePath)} has not changed. Skipping write.`,
+        );
+        return false; // No change, not written
+      }
+    }
+  } catch (readError) {
+    console.warn(
+      `${logPrefix}Warning: Could not read existing file ${filePath} for comparison. Proceeding to write. Error: ${readError.message}`,
+    );
+    // If we can't read, we'll assume it needs to be written or is new
+  }
+  try {
+    fs.writeFileSync(filePath, newDataString, 'utf8');
+    console.log(`${logPrefix}Saved data to ${filePath}.`);
+    return true; // Written
+  } catch (writeError) {
+    console.error(`${logPrefix}Error writing file ${filePath}:`, writeError);
+    // Depending on severity, you might want to process.exit(1) here
+    return false; // Failed to write
   }
 }
 
 async function fetchWithRetry(url, retries = 3, delay = 1000) {
   for (let i = 0; i < retries; i++) {
     try {
+      // Assuming 'fetch' is available globally (e.g., Node.js 18+ or with a polyfill)
       const response = await fetch(url);
       if (!response.ok) {
-        // Log more details on HTTP errors
         const errorBody = await response.text().catch(() => 'Could not read error body');
         throw new Error(
           `HTTP error! Status: ${response.status} ${
@@ -40,17 +70,16 @@ async function fetchWithRetry(url, retries = 3, delay = 1000) {
           }. Body: ${errorBody.substring(0, 200)}`,
         );
       }
-      // IMPORTANT: Return the raw text response to preserve formatting
-      return await response.text();
+      return await response.text(); // Return raw text
     } catch (error) {
       console.warn(`Fetch attempt ${i + 1} failed for ${url}: ${error.message}`);
       if (i < retries - 1) {
         console.log(`Retrying in ${delay / 1000}s...`);
         await new Promise((resolve) => setTimeout(resolve, delay));
-        delay *= 2; // Exponential backoff (optional)
+        delay *= 2;
       } else {
         console.error(`Failed to fetch ${url} after ${retries} attempts.`);
-        throw error; // Re-throw the error after final attempt fails
+        throw error;
       }
     }
   }
@@ -59,75 +88,63 @@ async function fetchWithRetry(url, retries = 3, delay = 1000) {
 // --- Main Fetch Logic ---
 
 async function fetchAndSaveCurrencyData() {
-  // Use the provided API URL directly. Consider moving to an environment variable for production.
-  const apiUrl =
-    'https://openexchangerates.org/api/latest.json?app_id=db1a0b1520c9402b8cf3a774f6b30d76';
-  // const apiUrl = process.env.APIURL; // Keep this commented if using the hardcoded one
+  const apiUrl = process.env.APIURL;
   if (!apiUrl) {
     console.error('Error: APIURL environment variable is not set.');
     process.exit(1);
   }
 
-  console.log(`Fetching data from Open Exchange Rates...`); // Generic log
+  console.log(`Fetching data from Open Exchange Rates...`);
 
   try {
-    // Fetch the raw text data
     const rawData = await fetchWithRetry(apiUrl);
+    let parsedApiData; // This will hold the full parsed API response
+    let preparedJsonString; // This will be the string we intend to save
 
-    // --- Optional: Basic Validation of the fetched data before saving ---
-    // Try parsing to check if it's valid JSON, but save the rawData later
-    let jsonData;
-    let json;
     try {
-      jsonData = JSON.parse(rawData);
-      json = JSON.stringify(
+      parsedApiData = JSON.parse(rawData);
+      // Prepare the specific structure you want to save
+      preparedJsonString = JSON.stringify(
         {
-          timestamp: jsonData.timestamp,
-          base: jsonData.base,
-          rates: jsonData.rates,
+          timestamp: parsedApiData.timestamp,
+          base: parsedApiData.base,
+          rates: parsedApiData.rates,
         },
-        0,
+        null, // No replacer function
+        2, // Indent with 2 spaces for readability (optional, but good for diffs)
       );
     } catch (parseError) {
       console.error('Error parsing JSON response:', parseError.message);
       console.error('Received data sample (first 500 chars):', rawData.substring(0, 500));
-      // Decide if you want to exit or maybe try saving the raw data anyway
-      // For now, we exit if parsing fails, as it indicates a problem.
       process.exit(1);
     }
 
-    // Basic validation on the parsed data (optional but recommended)
     if (
-      typeof jsonData.timestamp === 'undefined' ||
-      typeof jsonData.base === 'undefined' ||
-      typeof jsonData.rates === 'undefined'
+      typeof parsedApiData.timestamp === 'undefined' ||
+      typeof parsedApiData.base === 'undefined' ||
+      typeof parsedApiData.rates === 'undefined'
     ) {
-      // Decide if this is a critical error.
-      console.error('Error: Received JSON data is missing required fields.');
+      console.error(
+        'Error: Received JSON data is missing required fields (timestamp, base, rates).',
+      );
       process.exit(1);
     }
-    // --- End Optional Validation ---
 
-    // Ensure directories exist before writing files
     ensureDirectoryExists(LATEST_DIR);
     ensureDirectoryExists(DAILY_DATA_DIR);
 
-    // Get the correctly formatted date string
-    const currentDateStr = getCurrentDateString(); // Will be YYYY-MM-DD
+    const currentDateStr = getCurrentDateString();
     const dailyFilePath = path.join(DAILY_DATA_DIR, `${currentDateStr}.json`);
 
-    // --- Save the raw data ---
-    // This preserves original formatting, spacing, and all fields (disclaimer, license). No minification occurs.
-    fs.writeFileSync(LATEST_FILE, json, 'utf8'); // Specify encoding
-    console.log(`Saved latest data to ${LATEST_FILE}`);
+    // Save latest data IF CHANGED
+    writeDataIfChanged(LATEST_FILE, preparedJsonString, '[LATEST] ');
 
-    // Save/Overwrite the daily snapshot with the same raw data
-    fs.writeFileSync(dailyFilePath, json, 'utf8'); // Specify encoding
-    console.log(`Saved daily snapshot to: ${dailyFilePath}`);
+    // Save daily snapshot IF CHANGED (or if it's a new day's file)
+    // For daily file, it's always "new" for that specific day or an update if run multiple times a day
+    writeDataIfChanged(dailyFilePath, preparedJsonString, '[DAILY] ');
   } catch (error) {
-    // Catch errors from fetchWithRetry or file writing
     console.error('Error during fetch or save process:', error.message);
-    process.exit(1); // Exit with an error code
+    process.exit(1);
   }
 }
 

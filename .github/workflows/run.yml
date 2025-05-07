@@ -2,8 +2,8 @@ name: Schedule Update
 
 on:
   schedule:
-    - cron: '0 * * * *'
-  workflow_dispatch:
+    - cron: '0 * * * *' # Runs at the start of every hour
+  workflow_dispatch: # Allows manual triggering
 
 jobs:
   build-and-deploy:
@@ -12,56 +12,86 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.PAT }} # PAT for pushing changes back to the repo
+          token: ${{ secrets.PAT }} # PAT for committing and pushing changes back to the repo
+
+      # Attempt to restore original Git modification times.
+      # This helps aws s3 sync correctly identify unchanged files if checkout updates their mtime.
+      - name: Restore Git modification times
+        run: |
+          echo "Attempting to restore original Git modification times..."
+          git ls-files -z | while IFS= read -r -d $'\0' file; do
+            if [ -f "$file" ]; then # Ensure file actually exists on disk
+              # Get commit timestamp as Unix epoch seconds, suppress git log errors
+              commit_unix_time=$(git log -1 --format=%ct -- "$file" 2>/dev/null)
+              if [ -n "$commit_unix_time" ]; then
+                # Format for `touch -t [[CC]YY]MMDDhhmm[.ss]`, suppress date errors
+                formatted_touch_time=$(date -u -d "@$commit_unix_time" +'%Y%m%d%H%M.%S' 2>/dev/null)
+                if [ -n "$formatted_touch_time" ]; then
+                  # Attempt to touch the file, ignore errors (best effort)
+                  touch -m -t "$formatted_touch_time" "$file" 2>/dev/null 
+                fi
+              fi
+            fi
+          done
+          echo "Git modification times restoration attempt complete."
+        continue-on-error: true # Don't fail job if this experimental step has minor issues
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '20' # Or your preferred Node.js version
+          cache: 'npm' # Optional: cache npm dependencies if you have a package-lock.json
 
-      - name: Fetch Latest Currency Data
+      # If you have npm dependencies, uncomment and use:
+      # - name: Install dependencies
+      #   run: npm ci
+
+      - name: Fetch Latest Currency Data (index.js)
         id: fetch_data
         run: node index.js
         env:
           APIURL: ${{ secrets.APIURL }}
-        continue-on-error: false
+        continue-on-error: false # Fail job if API fetch or initial save fails
 
-      - name: Cleanup Old Data (> 5 years)
+      - name: Cleanup Old Data in ./data (> 5 years)
         id: cleanup_data
         if: steps.fetch_data.outcome == 'success'
         run: |
           TARGET_DIR="./data"
-          DAYS_OLD=1825 # Files older than approx 5 years
+          DAYS_OLD=1825 # Approximately 5 years
           echo "Cleaning up files older than $DAYS_OLD days in $TARGET_DIR..."
-          find "$TARGET_DIR" -maxdepth 1 -type f -name '????-??-??.json' -mtime +$DAYS_OLD -print0 | while IFS= read -r -d $'\0' file; do
-            echo "Deleting old file: $file (Last modified: $(stat -c %y "$file"))"
-            rm -f "$file" || echo "Warning: Failed to delete $file"
-          done
-          echo "Cleanup complete. Remaining JSON files in $TARGET_DIR: $(find "$TARGET_DIR" -maxdepth 1 -type f -name '????-??-??.json' | wc -l)"
+          # Find and delete old daily files, be less verbose on individual deletions
+          find "$TARGET_DIR" -maxdepth 1 -type f -name '????-??-??.json' -mtime +$DAYS_OLD -print -delete || echo "Warning: find/delete command for cleanup encountered an issue but was allowed to continue."
+          # Optional: Log remaining count if needed for debugging, otherwise keep it quiet
+          # echo "Remaining JSON files in $TARGET_DIR after cleanup: $(find "$TARGET_DIR" -maxdepth 1 -type f -name '????-??-??.json' | wc -l)"
+          echo "Cleanup of old data in ./data complete."
 
-      - name: Generate Historical Data
+      - name: Generate Historical Data (generate_history.js)
         id: generate_history
         if: steps.fetch_data.outcome == 'success' && steps.cleanup_data.outcome == 'success'
         run: node generate_history.js
 
-      - name: Commit and push changes
+      - name: Commit and push changes to repository
         id: commit_changes
         if: steps.fetch_data.outcome == 'success' && steps.cleanup_data.outcome == 'success' && steps.generate_history.outcome == 'success'
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          # Add all potentially changed directories
           git add latest/ data/ history/
+          # Check if there are any staged changes before attempting to commit
           if ! git diff --staged --quiet; then
             COMMIT_MSG="Update Currencies $(date -u +'%Y-%m-%d T %H-%M-%S UTC')"
+            echo "Committing changes: $COMMIT_MSG"
             git commit -m "$COMMIT_MSG"
+            echo "Pushing changes to repository..."
             git push https://x-access-token:${{ secrets.PAT }}@github.com/${{ github.repository }}
           else
-            echo "No changes detected in currency data to commit."
+            echo "No content changes detected in currency data to commit to repository."
           fi
 
-      # AWS CLI v2 is pre-installed on ubuntu-latest runners
-
-      - name: Upload data to Cloudflare R2
+      - name: Sync changed files to Cloudflare R2
+        # Run if the main data generation steps were successful
         if: steps.fetch_data.outcome == 'success' && steps.cleanup_data.outcome == 'success' && steps.generate_history.outcome == 'success'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -70,43 +100,21 @@ jobs:
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
         run: |
           echo "Verifying AWS CLI availability..."
-          aws --version # Confirm aws cli is available
+          aws --version # Quick check that CLI is present
 
-          # Sync 'latest' directory - files change often
-          if [ -d "./latest" ]; then
-            echo "Syncing './latest/' to R2 bucket '$R2_BUCKET_NAME' under 'latest/'..."
-            aws s3 sync "./latest/" "s3://${R2_BUCKET_NAME}/latest/" \
-              --endpoint-url "${R2_ENDPOINT_URL}" \
-              --acl public-read \
-              --delete
-          else
-            echo "Directory './latest' not found. Skipping."
-          fi
-
-          # Sync 'history' directory - files change often
-          if [ -d "./history" ]; then
-            echo "Syncing './history/' to R2 bucket '$R2_BUCKET_NAME' under 'history/'..."
-            aws s3 sync "./history/" "s3://${R2_BUCKET_NAME}/history/" \
-              --endpoint-url "${R2_ENDPOINT_URL}" \
-              --acl public-read \
-              --delete
-          else
-            echo "Directory './history' not found. Skipping."
-          fi
-
-          # Sync 'data' directory
-          # Today's file might change/be new. Older files should be static locally.
-          # Use --dryrun initially to see what it plans to do with older files.
-          # If old files are constantly re-uploaded, it's likely due to checkout timestamps.
-          if [ -d "./data" ]; then
-            echo "Syncing './data/' to R2 bucket '$R2_BUCKET_NAME' under 'data/' (DRY RUN INITIALLY)..."
-            aws s3 sync "./data/" "s3://${R2_BUCKET_NAME}/data/" \
-              --endpoint-url "${R2_ENDPOINT_URL}" \
-              --acl public-read \
-              --delete \
-              --dryrun # <-- REMOVE THIS AFTER TESTING AND CONFIRMING BEHAVIOR
-          else
-            echo "Directory './data' not found. Skipping."
-          fi
-
-          echo "R2 upload process complete."
+          DIRECTORIES_TO_SYNC="latest history data"
+          for DIR_NAME in $DIRECTORIES_TO_SYNC; do
+            if [ -d "./$DIR_NAME" ]; then
+              echo "Syncing changed files from './$DIR_NAME/' to R2 bucket '$R2_BUCKET_NAME' under '$DIR_NAME/'..."
+              # --no-progress reduces log verbosity by hiding per-file transfer status
+              # --delete ensures files removed locally are also removed from R2
+              aws s3 sync "./$DIR_NAME/" "s3://${R2_BUCKET_NAME}/${DIR_NAME}/" \
+                --endpoint-url "${R2_ENDPOINT_URL}" \
+                --acl public-read \
+                --delete \
+                --no-progress
+            else
+              echo "Directory './$DIR_NAME' not found locally. Skipping sync for this directory."
+            fi
+          done
+          echo "Cloudflare R2 sync process complete."

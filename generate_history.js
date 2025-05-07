@@ -6,12 +6,12 @@ const HISTORY_DIR = './history';
 
 // Define periods: lookback days and sampling rules
 const HISTORY_PERIODS = {
-  week: { days: 7, sampleRule: { type: 'gap', value: 1 } }, // Every day file found
-  month: { days: 31, sampleRule: { type: 'gap', value: 2 } }, // Every 2nd day file found
-  '6m': { days: 183, sampleRule: { type: 'daysOfMonth', values: [1, 11, 21] } }, // Target days 1, 11, 21
-  year: { days: 366, sampleRule: { type: 'daysOfMonth', values: [1, 15] } }, // Target days 1, 15
-  '2y': { days: 731, sampleRule: { type: 'dayOfMonth', value: 1 } }, // Target day 1 of each month
-  '5y': { days: 1826, sampleRule: { type: 'firstDayOfNthMonth', value: 3 } }, // Target 1st of every 3rd month (Jan, Apr, Jul, Oct)
+  week: { days: 7, sampleRule: { type: 'gap', value: 1 } },
+  month: { days: 31, sampleRule: { type: 'gap', value: 2 } },
+  '6m': { days: 183, sampleRule: { type: 'daysOfMonth', values: [1, 11, 21] } },
+  year: { days: 366, sampleRule: { type: 'daysOfMonth', values: [1, 15] } },
+  '2y': { days: 731, sampleRule: { type: 'dayOfMonth', value: 1 } },
+  '5y': { days: 1826, sampleRule: { type: 'firstDayOfNthMonth', value: 3 } },
 };
 
 // --- Helper Functions ---
@@ -25,6 +25,33 @@ function ensureDirectoryExists(dirPath) {
       console.error(`Error creating dir ${dirPath}:`, e);
       process.exit(1);
     }
+  }
+}
+
+// Copied from index.js - consider making this a shared utility if you have many scripts
+function writeDataIfChanged(filePath, newDataString, logPrefix = '') {
+  try {
+    if (fs.existsSync(filePath)) {
+      const existingDataString = fs.readFileSync(filePath, 'utf8');
+      if (existingDataString === newDataString) {
+        console.log(
+          `${logPrefix}Content for ${path.basename(filePath)} has not changed. Skipping write.`,
+        );
+        return false; // No change, not written
+      }
+    }
+  } catch (readError) {
+    console.warn(
+      `${logPrefix}Warning: Could not read existing file ${filePath} for comparison. Proceeding to write. Error: ${readError.message}`,
+    );
+  }
+  try {
+    fs.writeFileSync(filePath, newDataString, 'utf8');
+    console.log(`${logPrefix}Saved data to ${filePath}.`);
+    return true; // Written
+  } catch (writeError) {
+    console.error(`${logPrefix}Error writing file ${filePath}:`, writeError);
+    return false; // Failed to write
   }
 }
 
@@ -46,14 +73,14 @@ function parseDateFromFilename(filename) {
 
 function getUTCDateString(date) {
   if (!date || isNaN(date.getTime())) return null;
-  return date.toISOString().slice(0, 10); // YYYY-MM-DD format
+  return date.toISOString().slice(0, 10);
 }
 
 function getUTCMonthString(date) {
   if (!date || isNaN(date.getTime())) return null;
   const year = date.getUTCFullYear();
   const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-  return `${year}-${month}`; // YYYY-MM format
+  return `${year}-${month}`;
 }
 
 // --- Main Logic ---
@@ -62,14 +89,13 @@ function generateHistory() {
   console.log('Starting history generation...');
   ensureDirectoryExists(HISTORY_DIR);
 
-  // 1. Read and Sort Available Daily Files (Oldest First)
   let allDailyFiles = [];
   try {
     const filenames = fs.readdirSync(DATA_DIR);
     allDailyFiles = filenames
       .map((filename) => ({ filename, date: parseDateFromFilename(filename) }))
       .filter((f) => f.date !== null)
-      .sort((a, b) => a.date.getTime() - b.date.getTime()); // Sort oldest first
+      .sort((a, b) => a.date.getTime() - b.date.getTime());
   } catch (error) {
     if (error.code === 'ENOENT') {
       console.log('Data directory does not exist or is empty. Skipping history generation.');
@@ -87,34 +113,27 @@ function generateHistory() {
   console.log(`Found ${allDailyFiles.length} total valid daily data files.`);
   const now = new Date();
 
-  // 2. Process Each History Period
   for (const [period, config] of Object.entries(HISTORY_PERIODS)) {
     console.log(`\nProcessing period: ${period}`);
-
-    // Calculate cutoff date
     const cutoffDate = new Date(now);
     cutoffDate.setUTCDate(now.getUTCDate() - config.days);
     const cutoffTimestamp = cutoffDate.getTime();
-
-    // Filter files within the lookback period (still sorted oldest first)
     const relevantFiles = allDailyFiles.filter((f) => f.date.getTime() >= cutoffTimestamp);
 
     if (relevantFiles.length === 0) {
       console.log(` -> No data files found within the last ${config.days} days. Skipping.`);
       continue;
     }
-    console.log(` -> Found ${relevantFiles.length} files within the lookback period.`);
+    // console.log(` -> Found ${relevantFiles.length} files within the lookback period.`); // Less verbose
 
-    // --- Apply Sampling Logic ---
     let sampledFiles = [];
     const rule = config.sampleRule;
 
     if (rule.type === 'gap') {
       sampledFiles = relevantFiles.filter((_, index) => index % rule.value === 0);
-      console.log(` -> Selected ${sampledFiles.length} files using gap ${rule.value}.`);
     } else if (rule.type === 'daysOfMonth') {
       const targetDays = new Set(rule.values);
-      const includedDates = new Set(); // Track YYYY-MM-DD
+      const includedDates = new Set();
       sampledFiles = relevantFiles.filter((file) => {
         const dayOfMonth = file.date.getUTCDate();
         const dateStr = getUTCDateString(file.date);
@@ -124,80 +143,62 @@ function generateHistory() {
         }
         return false;
       });
-      console.log(
-        ` -> Selected ${sampledFiles.length} files targeting days ${rule.values.join(',')}.`,
-      );
     } else if (rule.type === 'dayOfMonth') {
-      // e.g., first available day on or after the 1st of each month
       const targetDay = rule.value;
-      const includedMonths = new Set(); // Track YYYY-MM
+      const includedMonths = new Set();
       sampledFiles = relevantFiles.filter((file) => {
         const monthStr = getUTCMonthString(file.date);
         const dayOfMonth = file.date.getUTCDate();
         if (dayOfMonth >= targetDay && !includedMonths.has(monthStr)) {
           includedMonths.add(monthStr);
-          return true; // Take the first file found in this month that meets the criteria
+          return true;
         }
         return false;
       });
-      console.log(
-        ` -> Selected ${sampledFiles.length} files targeting first available on/after day ${targetDay} of each month.`,
-      );
     } else if (rule.type === 'firstDayOfNthMonth') {
-      // e.g., first available day in Jan, Apr, Jul, Oct
       const monthGap = rule.value;
-      const includedMonths = new Set(); // Track YYYY-MM
+      const includedMonths = new Set();
       sampledFiles = relevantFiles.filter((file) => {
-        const monthIndex = file.date.getUTCMonth(); // 0-indexed (Jan=0)
+        const monthIndex = file.date.getUTCMonth();
         const monthStr = getUTCMonthString(file.date);
-        // Check if the month is one of the target months (0 % 3 === 0, 3 % 3 === 0, etc.)
         if (monthIndex % monthGap === 0 && !includedMonths.has(monthStr)) {
           includedMonths.add(monthStr);
-          return true; // Take the first file found in this target month
+          return true;
         }
         return false;
       });
-      console.log(
-        ` -> Selected ${sampledFiles.length} files targeting first available in every ${monthGap} months.`,
-      );
     }
+    // console.log(` -> Selected ${sampledFiles.length} files after sampling.`); // Less verbose
 
     if (sampledFiles.length === 0) {
       console.warn(` -> No files selected after sampling for period ${period}. Skipping.`);
       continue;
     }
 
-    // 3. Aggregate Data from Sampled Files
     const historicalRates = {};
     let latestTimestampUsed = 0;
     let baseCurrency = null;
 
     for (const fileInfo of sampledFiles) {
-      // Process in chronological order
       const dateString = getUTCDateString(fileInfo.date);
       if (!dateString) continue;
-
       try {
         const filePath = path.join(DATA_DIR, fileInfo.filename);
         const fileContent = fs.readFileSync(filePath, 'utf8');
         const dailyData = JSON.parse(fileContent);
-
         if (!baseCurrency && dailyData.base) baseCurrency = dailyData.base;
         const currentTimestamp = dailyData.timestamp || Math.floor(fileInfo.date.getTime() / 1000);
         latestTimestampUsed = Math.max(latestTimestampUsed, currentTimestamp);
-
         if (dailyData.rates) {
           for (const [currencyCode, rate] of Object.entries(dailyData.rates)) {
             if (typeof rate !== 'number') continue;
             if (!historicalRates[currencyCode]) historicalRates[currencyCode] = [];
             historicalRates[currencyCode].push({ date: dateString, rate: rate });
           }
-        } else {
-          console.warn(` -> 'rates' object missing in file: ${fileInfo.filename}`);
         }
       } catch (readError) {
         console.warn(
-          ` -> Warning: Failed to read/parse ${fileInfo.filename}. Skipping. Error: ${readError.message}`,
+          ` -> Warn: Failed to read/parse ${fileInfo.filename}. Error: ${readError.message}`,
         );
       }
     }
@@ -207,21 +208,19 @@ function generateHistory() {
       continue;
     }
 
-    // 4. Write Output File
-    const outputJson = {
+    const outputObject = {
+      // Renamed from outputJson to avoid confusion
       timestamp: latestTimestampUsed,
-      base: baseCurrency || 'USD',
+      base: baseCurrency || 'USD', // Default base if not found
       rates: historicalRates,
     };
+    // IMPORTANT: Use consistent formatting for comparison to work.
+    // Using 2-space indent for readability and better diffs.
+    // If you prefer minified, ensure index.js also produces minified for its files.
+    const outputString = JSON.stringify(outputObject, null, 0);
     const historyFilePath = path.join(HISTORY_DIR, `${period}.json`);
-    try {
-      fs.writeFileSync(historyFilePath, JSON.stringify(outputJson)); // Minified
-      console.log(
-        ` -> Successfully generated minified history file: ${historyFilePath} (${sampledFiles.length} data points)`,
-      );
-    } catch (writeError) {
-      console.error(` -> Error writing history file ${historyFilePath}:`, writeError);
-    }
+
+    writeDataIfChanged(historyFilePath, outputString, `[HISTORY/${period}] `);
   } // End period loop
 
   console.log('\nHistory generation finished.');
