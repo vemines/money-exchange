@@ -59,11 +59,7 @@ jobs:
             echo "No changes detected in currency data to commit."
           fi
 
-      # AWS CLI v2 is pre-installed on ubuntu-latest, so no installation step needed.
-      # You can verify its presence if you want:
-      # - name: Verify AWS CLI Version (Optional)
-      #   if: steps.fetch_data.outcome == 'success' && steps.cleanup_data.outcome == 'success' && steps.generate_history.outcome == 'success'
-      #   run: aws --version
+      # AWS CLI v2 is pre-installed on ubuntu-latest runners
 
       - name: Upload data to Cloudflare R2
         if: steps.fetch_data.outcome == 'success' && steps.cleanup_data.outcome == 'success' && steps.generate_history.outcome == 'success'
@@ -73,18 +69,44 @@ jobs:
           R2_ENDPOINT_URL: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
         run: |
-          DIRECTORIES_TO_SYNC="latest data history"
           echo "Verifying AWS CLI availability..."
           aws --version # Confirm aws cli is available
-          for DIR_NAME in $DIRECTORIES_TO_SYNC; do
-            if [ -d "./$DIR_NAME" ]; then
-              echo "Syncing './$DIR_NAME/' to R2 bucket '$R2_BUCKET_NAME' under '$DIR_NAME/'..."
-              aws s3 sync "./$DIR_NAME/" "s3://${R2_BUCKET_NAME}/${DIR_NAME}/" \
-                --endpoint-url "${R2_ENDPOINT_URL}" \
-                --acl public-read \
-                --delete # Removes files from R2 not present locally
-            else
-              echo "Directory './$DIR_NAME' not found. Skipping sync for this directory."
-            fi
-          done
+
+          # Sync 'latest' directory - files change often
+          if [ -d "./latest" ]; then
+            echo "Syncing './latest/' to R2 bucket '$R2_BUCKET_NAME' under 'latest/'..."
+            aws s3 sync "./latest/" "s3://${R2_BUCKET_NAME}/latest/" \
+              --endpoint-url "${R2_ENDPOINT_URL}" \
+              --acl public-read \
+              --delete
+          else
+            echo "Directory './latest' not found. Skipping."
+          fi
+
+          # Sync 'history' directory - files change often
+          if [ -d "./history" ]; then
+            echo "Syncing './history/' to R2 bucket '$R2_BUCKET_NAME' under 'history/'..."
+            aws s3 sync "./history/" "s3://${R2_BUCKET_NAME}/history/" \
+              --endpoint-url "${R2_ENDPOINT_URL}" \
+              --acl public-read \
+              --delete
+          else
+            echo "Directory './history' not found. Skipping."
+          fi
+
+          # Sync 'data' directory
+          # Today's file might change/be new. Older files should be static locally.
+          # Use --dryrun initially to see what it plans to do with older files.
+          # If old files are constantly re-uploaded, it's likely due to checkout timestamps.
+          if [ -d "./data" ]; then
+            echo "Syncing './data/' to R2 bucket '$R2_BUCKET_NAME' under 'data/' (DRY RUN INITIALLY)..."
+            aws s3 sync "./data/" "s3://${R2_BUCKET_NAME}/data/" \
+              --endpoint-url "${R2_ENDPOINT_URL}" \
+              --acl public-read \
+              --delete \
+              --dryrun # <-- REMOVE THIS AFTER TESTING AND CONFIRMING BEHAVIOR
+          else
+            echo "Directory './data' not found. Skipping."
+          fi
+
           echo "R2 upload process complete."
