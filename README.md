@@ -38,11 +38,18 @@ _Note: Be aware that some recently added currencies from openexchangerates.org m
 
 5. Go to Settings tab of your project, click on "Secrets and variables" -> "Actions" -> "New repository secret". Name is "PAT" then parse PAT from step 4 (customize in run.yml line 37). Add more "APIURL" with https://openexchangerates.org/api/latest.json?app_id=YOUR_APP_ID.
 
-6. Push code to your repository
+6. Create Cloudflare bucket R2. Add following repository secret
 
-7. Setup Github Pages to docs folder
+- `R2_ACCESS_KEY_ID`: (Found on the R2 API Token creation page in Cloudflare)
+- `R2_ACCOUNT_ID`: (Your Cloudflare Account ID, often visible in the Cloudflare dashboard URL or your account overview page)
+- `R2_BUCKET_NAME`: (The name you gave your R2 bucket)
+- `R2_SECRET_ACCESS_KEY`: (Found on the R2 API Token creation page in Cloudflare – **copy this immediately as it's shown only once**)
 
-8. Run your workflow https://github.com/username/repo-name/actions/workflows/run.yml
+7. Push code to your repository
+
+8. Setup Github Pages to docs folder
+
+9. Run your workflow https://github.com/username/repo-name/actions/workflows/run.yml
 
 ## License
 

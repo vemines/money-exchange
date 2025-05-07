@@ -1,76 +1,89 @@
 name: Schedule Update
 
 on:
-  # Triggers the workflow every hour automatically
   schedule:
     - cron: '0 * * * *'
-  # Allows manual triggering from the GitHub Actions UI
   workflow_dispatch:
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
-
     steps:
-      # Get the repository code
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          # Provide PAT to allow the job to push changes back to the repo
-          token: ${{ secrets.PAT }}
+          token: ${{ secrets.PAT }} # PAT for pushing changes back to the repo
 
-      # Set up the Node.js environment needed to run the scripts
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # Run the script to fetch the latest currency rates
       - name: Fetch Latest Currency Data
         id: fetch_data
         run: node index.js
         env:
-          # Pass the API URL (including app_id) from GitHub Secrets
           APIURL: ${{ secrets.APIURL }}
-        # Fail the job if data fetching doesn't succeed
         continue-on-error: false
 
-      # Remove daily data files older than 5 years to keep the repo size manageable
       - name: Cleanup Old Data (> 5 years)
         id: cleanup_data
-        # Only run if fetching data was successful
         if: steps.fetch_data.outcome == 'success'
         run: |
-          echo "Searching for daily data files older than 5 years (1826 days)..."
-          # Find files in ./data modified more than 1825 days ago and delete them
-          find ./data/ -maxdepth 1 -type f -name '????-??-??.json' -mtime +1825 -print -delete || true
-          echo "Cleanup complete."
+          TARGET_DIR="./data"
+          DAYS_OLD=1825 # Files older than approx 5 years
+          echo "Cleaning up files older than $DAYS_OLD days in $TARGET_DIR..."
+          # Find and delete files matching pattern and age, logging each deletion
+          find "$TARGET_DIR" -maxdepth 1 -type f -name '????-??-??.json' -mtime +$DAYS_OLD -print0 | while IFS= read -r -d $'\0' file; do
+            echo "Deleting old file: $file (Last modified: $(stat -c %y "$file"))"
+            rm -f "$file" || echo "Warning: Failed to delete $file"
+          done
+          echo "Cleanup complete. Remaining JSON files in $TARGET_DIR: $(find "$TARGET_DIR" -maxdepth 1 -type f -name '????-??-??.json' | wc -l)"
 
-      # Run the script to generate the historical summary files (week, month, etc.)
       - name: Generate Historical Data
         id: generate_history
-        # Only run if fetching and cleanup were successful
         if: steps.fetch_data.outcome == 'success' && steps.cleanup_data.outcome == 'success'
         run: node generate_history.js
 
-      # Commit the updated latest, daily, and historical files back to the repository
       - name: Commit and push changes
-        # Only run if all previous data steps were successful
+        id: commit_changes
         if: steps.fetch_data.outcome == 'success' && steps.cleanup_data.outcome == 'success' && steps.generate_history.outcome == 'success'
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          # Stage potential changes in all relevant directories
           git add latest/ data/ history/
-          # Only commit and push if changes were actually staged
           if ! git diff --staged --quiet; then
-            COMMIT_TIMESTAMP=$(date -u +'%Y-%m-%d T %H-%M-%S UTC')
-            COMMIT_MSG="Update Currencies ${COMMIT_TIMESTAMP}"
-            echo "Committing changes: $COMMIT_MSG"
+            COMMIT_MSG="Update Currencies $(date -u +'%Y-%m-%d T %H-%M-%S UTC')"
             git commit -m "$COMMIT_MSG"
-            echo "Pushing changes..."
-            # Use the PAT for authentication when pushing
             git push https://x-access-token:${{ secrets.PAT }}@github.com/${{ github.repository }}
           else
-            echo "No changes detected in currency data."
+            echo "No changes detected in currency data to commit."
           fi
+
+      - name: Install AWS CLI
+        if: steps.fetch_data.outcome == 'success' && steps.cleanup_data.outcome == 'success' && steps.generate_history.outcome == 'success'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq awscli
+
+      - name: Upload data to Cloudflare R2
+        if: steps.fetch_data.outcome == 'success' && steps.cleanup_data.outcome == 'success' && steps.generate_history.outcome == 'success'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT_URL: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          DIRECTORIES_TO_SYNC="latest data history"
+          for DIR_NAME in $DIRECTORIES_TO_SYNC; do
+            if [ -d "./$DIR_NAME" ]; then
+              echo "Syncing './$DIR_NAME/' to R2 bucket '$R2_BUCKET_NAME' under '$DIR_NAME/'..."
+              aws s3 sync "./$DIR_NAME/" "s3://${R2_BUCKET_NAME}/${DIR_NAME}/" \
+                --endpoint-url "${R2_ENDPOINT_URL}" \
+                --acl public-read \
+                --delete # Removes files from R2 not present locally
+            else
+              echo "Directory './$DIR_NAME' not found. Skipping sync for this directory."
+            fi
+          done
+          echo "R2 upload process complete."
