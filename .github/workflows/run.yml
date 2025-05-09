@@ -53,35 +53,27 @@ jobs:
         id: cleanup_data
         if: steps.fetch_data.outcome == 'success'
         run: |
-          echo "Cleaning up data older than 5 years from local ./data directory based on filename..."
+          echo "Scanning for data older than 5 years in local ./data directory (based on filename) to delete..."
 
-          # Calculate the cutoff timestamp (5 years ago in seconds since epoch)
-          # GitHub Actions runners use GNU date, which handles "X years ago" well.
-          # Use UTC for date calculations to be consistent.
           cutoff_timestamp=$(TZ=UTC date -d "5 years ago" +%s)
-          echo "Cutoff timestamp (UTC, 5 years ago): $cutoff_timestamp ($(TZ=UTC date -d "@$cutoff_timestamp"))"
+          # Optional: echo "Cutoff timestamp (UTC, 5 years ago): $cutoff_timestamp ($(TZ=UTC date -d "@$cutoff_timestamp"))"
 
-          # Ensure the data directory exists to avoid errors
           if [ ! -d "./data" ]; then
             echo "./data directory not found. Nothing to clean."
-            exit 0 # Exit successfully
+            exit 0
           fi
 
-          # Loop through files matching the pattern in ./data
-          # Using find with -print0 and while read -d $'\0' is safer for filenames with special characters
+          found_files_to_delete=false
+
           find "./data" -maxdepth 1 -type f -name '????-??-??.json' -print0 | while IFS= read -r -d $'\0' file; do
             filename=$(basename "$file")
-            # Extract date part from filename (e.g., 2017-01-15 from 2017-01-15.json)
             file_date_str="${filename%.json}"
 
-            # Validate that extracted string looks like a date (simple check)
             if [[ ! "$file_date_str" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
               echo "Skipping file with unexpected name format: $filename"
               continue
             fi
             
-            # Convert file's date string to a timestamp (seconds since epoch)
-            # Interpret the filename's date as UTC.
             file_timestamp=$(TZ=UTC date -d "$file_date_str" +%s 2>/dev/null)
             
             if [ -z "$file_timestamp" ]; then
@@ -89,19 +81,18 @@ jobs:
               continue
             fi
 
-            echo "Checking file: $filename (Date: $file_date_str, Timestamp: $file_timestamp)"
-
             if [ "$file_timestamp" -lt "$cutoff_timestamp" ]; then
-              echo "  DELETING old file: $file (File date $file_date_str is older than 5 years)"
+              echo "DELETING old file: $file (Date: $file_date_str)"
               rm -f "$file"
-            else
-              echo "  KEEPING file: $file (File date $file_date_str is not older than 5 years)"
+              found_files_to_delete=true
             fi
-          done || echo "Local cleanup script encountered an issue but will continue."
-          # The '|| echo' part handles if the 'find | while' loop itself fails non-catastrophically.
+          done || echo "Local cleanup script processing had warnings but continued."
 
-          echo "Local cleanup based on filename complete."
-          echo "Local cleanup complete."
+          if [ "$found_files_to_delete" = false ]; then
+            echo "No old files found to delete."
+          fi
+
+          echo "Local cleanup scan complete."
 
       # Generate history JSON files
       - name: Generate Historical Data
