@@ -37,7 +37,7 @@ _Note: Be aware that some recently added currencies from openexchangerates.org m
 
 4. Create personal access token (PAT). Token name "PAT", never expire -> "Only select repositories" -> Choose your repository, Add permission access "read and write" for "Contents" and "Pull requests". Generate token (remember copy it)
 
-5. Go to Settings tab of your project, click on "Secrets and variables" -> "Actions" -> "New repository secret". Name is "PAT". Add more "APP_ID" get from https://openexchangerates.org/account/app-ids
+5. Go to Settings tab of your project, click on "Secrets and variables" -> "Actions" -> "New repository secret". Name is "PAT". Add more "APPID" with app_id get from https://openexchangerates.org/account/app-ids
 
 6. Create Cloudflare bucket R2. Add following repository secret (Optional, if not use should remove in .github/workflows/run.yml)
 

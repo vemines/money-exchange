@@ -46,7 +46,7 @@ jobs:
         id: fetch_data
         run: node index.js
         env:
-          APIURL: ${{ secrets.APIURL }}
+          APPID: ${{ secrets.APPID }}
 
       # Cleanup old data (>5 years) from local ./data
       - name: Cleanup Old Data (> 5 years) from local ./data
