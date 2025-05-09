@@ -2,31 +2,27 @@ name: Schedule Update
 
 on:
   schedule:
-    - cron: '0 * * * *'      # Runs at the top of every hour
-  workflow_dispatch:        # Manual trigger supported
+    - cron: '0 * * * *' # Runs at the top of every hour
+  workflow_dispatch: # Manual trigger supported
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout code
+      # Checkout code
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.PAT }}
 
-      # 2. Set up Node.js
+      # Set up Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # 3. (Optional) Install npm deps
-      # - name: Install dependencies
-      #   run: npm ci
-
-      # 4. Restore Git mtimes BEFORE running scripts
+      # Restore Git mtimes BEFORE running scripts
       - name: Restore Git modification times (pre-script)
         continue-on-error: true
         run: |
@@ -45,30 +41,75 @@ jobs:
             done
           echo "Pre-script mtime restoration complete."
 
-      # 5. Fetch latest currency data
+      # Fetch latest currency data
       - name: Fetch Latest Currency Data
         id: fetch_data
         run: node index.js
         env:
           APIURL: ${{ secrets.APIURL }}
 
-      # 6. Cleanup old data (>5 years) from local ./data
+      # Cleanup old data (>5 years) from local ./data
       - name: Cleanup Old Data (> 5 years) from local ./data
         id: cleanup_data
         if: steps.fetch_data.outcome == 'success'
         run: |
-          echo "Cleaning up data older than 5 years from local ./data directory..."
-          find "./data" -maxdepth 1 -type f -name '????-??-??.json' \
-            -mtime +1825 -print -delete || echo "Local cleanup step had warnings but continued."
+          echo "Cleaning up data older than 5 years from local ./data directory based on filename..."
+
+          # Calculate the cutoff timestamp (5 years ago in seconds since epoch)
+          # GitHub Actions runners use GNU date, which handles "X years ago" well.
+          # Use UTC for date calculations to be consistent.
+          cutoff_timestamp=$(TZ=UTC date -d "5 years ago" +%s)
+          echo "Cutoff timestamp (UTC, 5 years ago): $cutoff_timestamp ($(TZ=UTC date -d "@$cutoff_timestamp"))"
+
+          # Ensure the data directory exists to avoid errors
+          if [ ! -d "./data" ]; then
+            echo "./data directory not found. Nothing to clean."
+            exit 0 # Exit successfully
+          fi
+
+          # Loop through files matching the pattern in ./data
+          # Using find with -print0 and while read -d $'\0' is safer for filenames with special characters
+          find "./data" -maxdepth 1 -type f -name '????-??-??.json' -print0 | while IFS= read -r -d $'\0' file; do
+            filename=$(basename "$file")
+            # Extract date part from filename (e.g., 2017-01-15 from 2017-01-15.json)
+            file_date_str="${filename%.json}"
+
+            # Validate that extracted string looks like a date (simple check)
+            if [[ ! "$file_date_str" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+              echo "Skipping file with unexpected name format: $filename"
+              continue
+            fi
+            
+            # Convert file's date string to a timestamp (seconds since epoch)
+            # Interpret the filename's date as UTC.
+            file_timestamp=$(TZ=UTC date -d "$file_date_str" +%s 2>/dev/null)
+            
+            if [ -z "$file_timestamp" ]; then
+              echo "Warning: Could not parse date from filename: $filename. Skipping."
+              continue
+            fi
+
+            echo "Checking file: $filename (Date: $file_date_str, Timestamp: $file_timestamp)"
+
+            if [ "$file_timestamp" -lt "$cutoff_timestamp" ]; then
+              echo "  DELETING old file: $file (File date $file_date_str is older than 5 years)"
+              rm -f "$file"
+            else
+              echo "  KEEPING file: $file (File date $file_date_str is not older than 5 years)"
+            fi
+          done || echo "Local cleanup script encountered an issue but will continue."
+          # The '|| echo' part handles if the 'find | while' loop itself fails non-catastrophically.
+
+          echo "Local cleanup based on filename complete."
           echo "Local cleanup complete."
 
-      # 7. Generate history JSON files
+      # Generate history JSON files
       - name: Generate Historical Data
         id: generate_history
         if: steps.fetch_data.outcome == 'success' && steps.cleanup_data.outcome == 'success'
         run: node generate_history.js
 
-      # 8. Commit & push any changes back to the repo
+      # Commit & push any changes back to the repo
       - name: Commit & Push Changes
         id: commit_changes
         if: steps.generate_history.outcome == 'success'
@@ -83,8 +124,8 @@ jobs:
             echo "No changes to commit."
           fi
 
-      # 9. Sync 'latest' and 'history' folders to Cloudflare R2
-      - name: Sync 'latest' and 'history' to R2
+      # Sync folders to Cloudflare R2
+      - name: Sync to R2
         id: sync_latest_history_to_r2
         if: steps.generate_history.outcome == 'success'
         env:
@@ -94,7 +135,7 @@ jobs:
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
         run: |
           echo "Starting sync of 'latest' and 'history' to R2..."
-          for DIR in latest history; do
+          for DIR in latest history currencies; do
             if [ -d "$DIR" ]; then
               echo " → Syncing $DIR/"
               aws s3 sync "./$DIR/" "s3://${R2_BUCKET_NAME}/${DIR}/" \
