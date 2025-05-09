@@ -170,10 +170,10 @@ async function fetchAndSaveExchangeRates(appId) {
 
 // --- Main Execution ---
 async function run() {
-  const appId = process.env.OXR_APP_ID;
+  const appId = process.env.APP_ID;
   if (!appId) {
     console.error(
-      'Error: OXR_APP_ID environment variable is not set. Please set it to your Open Exchange Rates App ID.',
+      'Error: APP_ID environment variable is not set. Please set it to your Open Exchange Rates App ID.',
     );
     process.exit(1);
   }
