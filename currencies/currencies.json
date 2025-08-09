@@ -128,7 +128,8 @@
   "SEK": "Swedish Krona",
   "SGD": "Singapore Dollar",
   "SHP": "Saint Helena Pound",
-  "SLL": "Sierra Leonean Leone",
+  "SLE": "Sierra Leonean Leone",
+  "SLL": "Sierra Leonean Leone (Old)",
   "SOS": "Somali Shilling",
   "SRD": "Surinamese Dollar",
   "SSP": "South Sudanese Pound",
@@ -160,6 +161,7 @@
   "XAG": "Silver Ounce",
   "XAU": "Gold Ounce",
   "XCD": "East Caribbean Dollar",
+  "XCG": "Caribbean Guilder",
   "XDR": "Special Drawing Rights",
   "XOF": "CFA Franc BCEAO",
   "XPD": "Palladium Ounce",
@@ -168,5 +170,6 @@
   "YER": "Yemeni Rial",
   "ZAR": "South African Rand",
   "ZMW": "Zambian Kwacha",
+  "ZWG": "Zimbabwean ZiG",
   "ZWL": "Zimbabwean Dollar"
 }
