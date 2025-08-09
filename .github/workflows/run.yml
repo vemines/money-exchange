@@ -28,25 +28,6 @@ jobs:
         with:
           node-version: '20'
 
-      # Restore Git mtimes BEFORE running scripts
-      - name: Restore Git modification times (pre-script)
-        continue-on-error: true
-        run: |
-          echo "Restoring git mtimes..."
-          git ls-files -z | \
-            while IFS= read -r -d $'\0' file; do
-              if [ -f "$file" ]; then
-                ts=$(git log -1 --format=%ct -- "$file" 2>/dev/null)
-                if [ -n "$ts" ]; then
-                  formatted_time=$(date -u -d "@$ts" +'%Y%m%d%H%M.%S' 2>/dev/null)
-                  if [ -n "$formatted_time" ]; then
-                     touch -m -t "$formatted_time" "$file" 2>/dev/null
-                  fi
-                fi
-              fi
-            done
-          echo "Pre-script mtime restoration complete."
-
       # Fetch latest currency data
       - name: Fetch Latest Currency Data
         id: fetch_data
