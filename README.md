@@ -1,59 +1,152 @@
 # Money Exchange
 
-A simple web application for currency exchange that fetches exchange rates per hours and allows users to convert between different currencies.
+A simple web application for currency exchange that fetches exchange rates hourly and allows users to convert between different currencies with real-time data.
 
-You can view a live demo of the project at: [Live demo](https://vemines.github.io/money-exchange)
+🌐 **Live Demo**: [money-exchange](https://vemines.github.io/money-exchange)
 
-[Latest Data](https://raw.githubusercontent.com/vemines/money-exchange/main/latest/data.json) <br>
-[Currencies List](https://raw.githubusercontent.com/vemines/money-exchange/main/currencies/currencies.json) <br> <br>
-[Custom Day 2025-04-30](https://raw.githubusercontent.com/vemines/money-exchange/main/data/2025-04-30.json)<br>
-[Week History](https://raw.githubusercontent.com/vemines/money-exchange/main/history/week.json)<br>
-[Month History](https://raw.githubusercontent.com/vemines/money-exchange/main/history/month.json)<br>
-[6 Months History](https://raw.githubusercontent.com/vemines/money-exchange/main/history/6m.json)<br>
-[Year History](https://raw.githubusercontent.com/vemines/money-exchange/main/history/year.json)<br>
-[2 Years History](https://raw.githubusercontent.com/vemines/money-exchange/main/history/2y.json)<br>
-[5 Years History](https://raw.githubusercontent.com/vemines/money-exchange/main/history/5y.json)<br>
+## 📋 Quick Navigation
 
-_Note: Be aware that some recently added currencies from openexchangerates.org might not have complete historical data available. Please verify carefully before use._
+- [🚀 Public API Endpoints](#-public-api-endpoints)
+- [✨ Features](#-features)
+- [🛠️ Setup Instructions](#️-setup-instructions-for-create-your-own-api)
+- [📁 Project Structure](#-project-structure)
+- [🔗 Links](#-links)
+- [📄 License](#-license)
 
-## Features
+## 🚀 Public API Endpoints
 
-- Fetches currency data from an external from [openexchangerates.org](openexchangerates.org)
-- Displays a user-friendly interface for currency conversion.
-- Automatically saves latest data with GitHub Actions for CI/CD.
+Our fast, cached API powered by Cloudflare Workers:
 
-## Installation Github Action
+**Base URL**: `https://currencies.fvemines.workers.dev`
 
-1. Clone the repository:
+### Available Endpoints
 
-   ```bash
-   git clone https://github.com/vemines/money-exchange.git
-   cd money-exchange
+| Endpoint                      | Description                        | Cache TTL     |
+| ----------------------------- | ---------------------------------- | ------------- |
+| `/latest/data.json`           | Latest exchange rates              | 1 hour        |
+| `/currencies/currencies.json` | All supported currencies           | 1 year        |
+| `/data/YYYY-MM-DD.json`       | Historical rates for specific date | 1 year\*      |
+| `/history/week.json`          | Last 7 days rates                  | Daily refresh |
+| `/history/month.json`         | Last 30 days rates                 | Daily refresh |
+| `/history/6m.json`            | Last 6 months rates                | Daily refresh |
+| `/history/year.json`          | Last 365 days rates                | Daily refresh |
+| `/history/2y.json`            | Last 2 years rates                 | Daily refresh |
+| `/history/5y.json`            | Last 5 years rates                 | Daily refresh |
+
+\*Current day data cached for 1 hour
+
+### Example Usage
+
+```bash
+# Get latest exchange rates
+curl https://currencies.fvemines.workers.dev/latest/data.json
+
+# Get supported currencies
+curl https://currencies.fvemines.workers.dev/currencies/currencies.json
+
+# Get rates for specific date
+curl https://currencies.fvemines.workers.dev/data/2025-04-30.json
+
+# Get weekly historical data
+curl https://currencies.fvemines.workers.dev/history/week.json
+```
+
+### GitHub Raw Data
+
+Alternative direct access to data files:
+
+- [Latest Data](https://raw.githubusercontent.com/vemines/money-exchange/main/latest/data.json)
+- [Currencies List](https://raw.githubusercontent.com/vemines/money-exchange/main/currencies/currencies.json)
+- [Custom Day Example](https://raw.githubusercontent.com/vemines/money-exchange/main/data/2025-04-30.json)
+- [Historical Data](https://raw.githubusercontent.com/vemines/money-exchange/main/history/week.json)
+
+> ⚠️ **Note**: Some recently added currencies from [openexchangerates.org](https://openexchangerates.org) might not have complete historical data available. Please verify data completeness before production use.
+
+## ✨ Features
+
+- 🔄 **Real-time Data**: Fetches currency data hourly from [openexchangerates.org](https://openexchangerates.org)
+- 🎨 **User-friendly Interface**: Clean, responsive design for easy currency conversion
+- ⚡ **Fast API**: Cloudflare Workers with intelligent caching
+- 🤖 **Automated Updates**: GitHub Actions CI/CD pipeline for data refresh
+- 📊 **Historical Data**: Access to years of historical exchange rates
+- 🌍 **CORS Enabled**: Ready for cross-origin requests
+
+## 🛠️ Setup Instructions For Create Your Own API
+
+### 1. Clone & Setup Repository
+
+```bash
+git clone https://github.com/vemines/money-exchange.git
+cd money-exchange
+```
+
+### 2. GitHub Personal Access Token
+
+1. Go to **GitHub** → **Settings** → **Developer settings** → **Personal access tokens** → **Fine-grained tokens**
+2. Click **"Generate new token"**
+3. Configure:
+   - **Token name**: `PAT`
+   - **Expiration**: Never expire
+   - **Repository access**: Only select repositories → Choose your repo
+   - **Permissions**: Contents (read/write), Pull requests (read/write)
+4. **Generate token** and copy it immediately
+
+### 3. Configure Repository Secrets
+
+Go to your repo **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
+
+#### Required Secrets:
+
+- `PAT`: Your GitHub Personal Access Token
+- `APPID`: Your App ID from [openexchangerates.org](https://openexchangerates.org/account/app-ids)
+
+#### R2 Secrets (for Cloudflare storage):
+
+- `R2_ACCESS_KEY_ID`: From Cloudflare R2 API Token page
+- `R2_ACCOUNT_ID`: Your Cloudflare Account ID
+- `R2_BUCKET_NAME`: Your R2 bucket name
+- `R2_SECRET_ACCESS_KEY`: From R2 API Token (copy immediately!)
+
+> If not using R2, remove the R2 upload steps from `.github/workflows/run.yml`
+
+### 4. Setup Cloudflare Worker (for Cloudflare storage):
+
+1. Create a Cloudflare Worker
+2. Copy `cf_worker.js` to your worker
+3. Replace `R2_BASE` with your R2 public URL:
+   ```javascript
+   const R2_BASE = 'https://pub-YOUR-R2-BUCKET-ID.r2.dev';
    ```
+4. Deploy the worker
 
-2. Create github repository
+### 5. Deploy & Run
 
-3. Click your logo -> "Your Organizations" -> "Developer Settings" -> "Personal access tokens" -> "Fine-grained-tokens" -> Click "Generate new token"
+1. **Push to GitHub**: Your code will trigger the workflow
+2. **Enable GitHub Pages**: Settings → Pages → Source: Deploy from branch → Branch: (branch_name) → Folder: `/docs`
+3. **Run Workflow**: Go to Actions tab and manually trigger `run.yml`
 
-4. Create personal access token (PAT). Token name "PAT", never expire -> "Only select repositories" -> Choose your repository, Add permission access "read and write" for "Contents" and "Pull requests". Generate token (remember copy it)
+## 📁 Project Structure
 
-5. Go to Settings tab of your project, click on "Secrets and variables" -> "Actions" -> "New repository secret". Name is "PAT". Add more "APPID" with app_id get from https://openexchangerates.org/account/app-ids
+```
+money-exchange/
+├── .github/workflows/run.yml    # GitHub Actions workflow
+├── cf_worker.js                 # Cloudflare Worker code
+├── docs/                        # GitHub Pages site (diffence branch for avoid rebuild when currencies updated)
+├── latest/                      # Latest exchange rates
+├── data/                        # Historical daily rates
+├── history/                     # Aggregated historical data
+├── currencies/                  # Currency metadata
+└── README.md                    # This file
+```
 
-6. Create Cloudflare bucket R2. Add following repository secret (Optional, if not use should remove in .github/workflows/run.yml)
+## 🔗 Links
 
-- `R2_ACCESS_KEY_ID`: (Found on the R2 API Token creation page in Cloudflare)
-- `R2_ACCOUNT_ID`: (Your Cloudflare Account ID, often visible in the Cloudflare dashboard URL or your account overview page)
-- `R2_BUCKET_NAME`: (The name you gave your R2 bucket)
-- `R2_SECRET_ACCESS_KEY`: (Found on the R2 API Token creation page in Cloudflare – **copy this immediately as it's shown only once**)
+- 🌐 [Live Demo](https://vemines.github.io/money-exchange)
+- 📡 [Public API](https://currencies.fvemines.workers.dev/latest/data.json)
+- 📊 [Data Source](https://openexchangerates.org)
 
-7. Push code to your repository
-
-8. Setup Github Pages to docs folder
-
-9. Run your workflow https://github.com/username/repo-name/actions/workflows/run.yml
-
-## License
+## 📄 License
 
 This project is open-source and available under the [MIT License](LICENSE).
 
-- Created by VeMines with love ❤️. If you like this project please star ⭐ it
+💝 **Created by VeMines with love**. If you find this project useful, please give it a ⭐!
